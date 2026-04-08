@@ -55,17 +55,6 @@ function buildHTMLDocument(title: string, bodyEl: HTMLElement): string {
   <title>${escapeHtml(title)}</title>
   <style>
 ${css}
-    /* ---- Override Obsidian app layout constraints ---- */
-    html, body,
-    .markdown-preview-view, .markdown-rendered,
-    .view-content, .workspace, .workspace-leaf,
-    .mod-root, .app-container {
-      height: auto !important;
-      min-height: unset !important;
-      max-height: unset !important;
-      overflow: visible !important;
-      position: static !important;
-    }
     /* ---- Export overrides ---- */
     body {
       background: #fff !important;
@@ -156,101 +145,6 @@ function buildPDFDocument(title: string, bodyEl: HTMLElement): string {
 </html>`;
 }
 
-/** For mobile "Print / Save as PDF": standalone HTML with a fixed toolbar */
-function buildMobilePrintDocument(title: string, bodyEl: HTMLElement): string {
-	return `<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(title)}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
-      font-size: 14px;
-      line-height: 1.7;
-      color: #111;
-      background: #fff;
-    }
-    #toolbar {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      padding: 10px 16px;
-      background: #1e1e2e;
-      z-index: 9999;
-    }
-    #toolbar span {
-      flex: 1;
-      color: #cdd6f4;
-      font-size: 14px;
-      font-weight: 600;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .tb-btn {
-      border: none;
-      border-radius: 6px;
-      padding: 8px 16px;
-      font-size: 13px;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    #btn-print { background: #cba6f7; color: #1e1e2e; font-weight: 700; }
-    #btn-close { background: #45475a; color: #cdd6f4; }
-    #content {
-      padding: 72px 32px 40px;
-      max-width: 820px;
-      margin: 0 auto;
-    }
-    h1 { font-size: 2em;   margin: 0.8em 0 0.4em; }
-    h2 { font-size: 1.5em; margin: 0.8em 0 0.4em; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-    h3 { font-size: 1.2em; margin: 0.7em 0 0.3em; }
-    h4, h5, h6 { font-size: 1em; margin: 0.6em 0 0.3em; }
-    p  { margin: 0.6em 0; }
-    ul, ol { margin: 0.6em 0 0.6em 1.5em; }
-    li { margin: 0.2em 0; }
-    a  { color: #1a1aff; }
-    strong { font-weight: 700; }
-    em { font-style: italic; }
-    code {
-      font-family: 'SF Mono', Consolas, 'Courier New', monospace;
-      font-size: 0.875em;
-      background: #f4f4f4;
-      padding: 1px 5px;
-      border-radius: 3px;
-    }
-    pre { background: #f4f4f4; padding: 12px 16px; border-radius: 4px; overflow-x: auto; margin: 0.8em 0; }
-    pre code { background: none; padding: 0; }
-    blockquote { border-left: 4px solid #ccc; padding-left: 1em; color: #555; margin: 0.8em 0; }
-    table { border-collapse: collapse; width: 100%; margin: 0.8em 0; }
-    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
-    th { background: #f0f0f0; font-weight: 600; }
-    img { max-width: 100%; height: auto; }
-    hr { border: none; border-top: 1px solid #ddd; margin: 1.2em 0; }
-    @media print {
-      #toolbar { display: none !important; }
-      #content { padding: 0; }
-      @page { margin: 20mm; }
-    }
-  </style>
-</head>
-<body>
-  <div id="toolbar">
-    <span>${escapeHtml(title)}</span>
-    <button class="tb-btn" id="btn-print" onclick="window.print()">Save as PDF</button>
-    <button class="tb-btn" id="btn-close" onclick="window.close()">Close</button>
-  </div>
-  <div id="content">
-    ${bodyEl.innerHTML}
-  </div>
-</body>
-</html>`;
-}
 
 // ---------------------------------------------------------------------------
 // Preview Modal
@@ -377,15 +271,22 @@ class PDFPreviewModal extends Modal {
 	}
 
 	private doPrintMobile(): void {
-		const html = buildMobilePrintDocument(this.file.basename, this.previewEl);
-		const printWindow = window.open('', '_blank');
-		if (!printWindow) {
-			new Notice('Pop-up blocked. Use "Save as HTML" instead.');
-			return;
-		}
-		printWindow.document.write(html);
-		printWindow.document.close();
-		printWindow.focus();
+		const html = buildPDFDocument(this.file.basename, this.previewEl);
+
+		const iframe = document.createElement('iframe');
+		iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:none;';
+		document.body.appendChild(iframe);
+
+		const doc = iframe.contentDocument!;
+		doc.open();
+		doc.write(html);
+		doc.close();
+
+		// Wait for content to render, then trigger print dialog
+		setTimeout(() => {
+			iframe.contentWindow?.print();
+			setTimeout(() => document.body.removeChild(iframe), 2000);
+		}, 500);
 	}
 
 	/** Method 2: write self-contained HTML file to vault */
