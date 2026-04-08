@@ -178,15 +178,9 @@ class PDFPreviewModal extends Modal {
 
 		const printBtn = btnRow.createEl('button', {
 			cls: 'mod-cta md-to-pdf-btn',
-			text: 'Print / Save as PDF',
+			text: Platform.isMobile ? 'Save as PDF (via Chrome)' : 'Save as PDF',
 		});
 		printBtn.addEventListener('click', () => { this.doPrint(); });
-
-		const htmlBtn = btnRow.createEl('button', {
-			cls: 'md-to-pdf-btn',
-			text: 'Save as HTML',
-		});
-		htmlBtn.addEventListener('click', () => { void this.doSaveHTML(); });
 
 		const closeBtn = btnRow.createEl('button', {
 			cls: 'md-to-pdf-btn',
@@ -270,28 +264,16 @@ class PDFPreviewModal extends Modal {
 		}
 	}
 
-	private doPrintMobile(): void {
-		const html = buildPDFDocument(this.file.basename, this.previewEl);
-
-		const iframe = document.createElement('iframe');
-		iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:none;';
-		document.body.appendChild(iframe);
-
-		const doc = iframe.contentDocument!;
-		doc.open();
-		doc.write(html);
-		doc.close();
-
-		// Wait for content to render, then trigger print dialog
-		setTimeout(() => {
-			iframe.contentWindow?.print();
-			setTimeout(() => document.body.removeChild(iframe), 2000);
-		}, 500);
+	/** On mobile, direct PDF generation is not supported in Obsidian's WebView.
+	 *  Save as HTML and guide the user to print from Chrome. */
+	private async doPrintMobile(): Promise<void> {
+		await this.doSaveHTML();
 	}
 
-	/** Method 2: write self-contained HTML file to vault */
+	/** Write self-contained HTML file to vault (works on all platforms) */
 	async doSaveHTML(): Promise<void> {
-		const html = buildHTMLDocument(this.file.basename, this.previewEl);
+		// Use minimal CSS so Chrome on Android prints the full page correctly
+		const html = buildPDFDocument(this.file.basename, this.previewEl);
 		const outputPath = this.file.path.replace(/\.md$/, '.html');
 
 		try {
@@ -301,7 +283,11 @@ class PDFPreviewModal extends Modal {
 			} else {
 				await this.app.vault.create(outputPath, html);
 			}
-			new Notice(`Saved: ${outputPath}\nOpen in Chrome -> menu -> Print -> Save as PDF`);
+			new Notice(
+				Platform.isMobile
+					? `Saved: ${outputPath}\n1. Open the file in Chrome\n2. Tap menu -> Share -> Print\n3. Save as PDF`
+					: `Saved: ${outputPath}`
+			);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			new Notice('Export failed: ' + message);
