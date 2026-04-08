@@ -4,6 +4,7 @@ import {
 	MarkdownRenderer,
 	Modal,
 	Notice,
+	Platform,
 	Plugin,
 	TFile,
 } from 'obsidian';
@@ -39,6 +40,7 @@ function collectPageCSS(): string {
 	return parts.join('\n');
 }
 
+/** For "Save as HTML": embeds Obsidian theme CSS so it looks like the app */
 function buildHTMLDocument(title: string, bodyEl: HTMLElement): string {
 	const css = collectPageCSS();
 	return `<!DOCTYPE html>
@@ -70,6 +72,70 @@ ${css}
   </style>
 </head>
 <body class="theme-light markdown-preview-view markdown-rendered">
+  ${bodyEl.innerHTML}
+</body>
+</html>`;
+}
+
+/** For PDF export: uses minimal standalone CSS -- avoids Obsidian app:// conflicts in BrowserWindow */
+function buildPDFDocument(title: string, bodyEl: HTMLElement): string {
+	return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+      font-size: 14px;
+      line-height: 1.7;
+      color: #111;
+      background: #fff;
+      padding: 32px 40px;
+      max-width: 820px;
+      margin: 0 auto;
+    }
+    @page { margin: 20mm; }
+    h1 { font-size: 2em;   margin: 0.8em 0 0.4em; }
+    h2 { font-size: 1.5em; margin: 0.8em 0 0.4em; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    h3 { font-size: 1.2em; margin: 0.7em 0 0.3em; }
+    h4, h5, h6 { font-size: 1em; margin: 0.6em 0 0.3em; }
+    p  { margin: 0.6em 0; }
+    ul, ol { margin: 0.6em 0 0.6em 1.5em; }
+    li { margin: 0.2em 0; }
+    a  { color: #1a1aff; }
+    strong { font-weight: 700; }
+    em { font-style: italic; }
+    code {
+      font-family: 'SF Mono', Consolas, 'Courier New', monospace;
+      font-size: 0.875em;
+      background: #f4f4f4;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    pre {
+      background: #f4f4f4;
+      padding: 12px 16px;
+      border-radius: 4px;
+      overflow-x: auto;
+      margin: 0.8em 0;
+    }
+    pre code { background: none; padding: 0; }
+    blockquote {
+      border-left: 4px solid #ccc;
+      padding-left: 1em;
+      color: #555;
+      margin: 0.8em 0;
+    }
+    table { border-collapse: collapse; width: 100%; margin: 0.8em 0; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
+    th { background: #f0f0f0; font-weight: 600; }
+    img { max-width: 100%; height: auto; }
+    hr { border: none; border-top: 1px solid #ddd; margin: 1.2em 0; }
+  </style>
+</head>
+<body>
   ${bodyEl.innerHTML}
 </body>
 </html>`;
@@ -143,35 +209,76 @@ class PDFPreviewModal extends Modal {
 		});
 	}
 
-	/** Method 1: system print dialog -> user selects "Save as PDF" */
+	/** Method 1: print to PDF
+	 *  - Desktop: save HTML to vault, open in default browser, user prints from there
+	 *  - Mobile:  open a new window and call print() directly
+	 */
 	doPrint(): void {
-		const STYLE_ID = 'md-to-pdf-print-style';
-		let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
-		if (!style) {
-			style = document.createElement('style');
-			style.id = STYLE_ID;
-			document.head.appendChild(style);
+		if (Platform.isDesktop) {
+			void this.doPrintDesktop();
+		} else {
+			this.doPrintMobile();
 		}
+	}
 
-		// Hide everything except our preview when printing
-		style.textContent = `
-@media print {
-  body > *                  { display: none !important; }
-  .modal-container          { display: block !important; }
-  .modal-container > *      { display: none !important; }
-  .md-to-pdf-modal          { display: block !important; box-shadow: none !important; border: none !important; position: static !important; }
-  .md-to-pdf-modal > * { display: none !important; }
-  .md-to-pdf-preview        { display: block !important; padding: 0 !important; overflow: visible !important; }
-  .md-to-pdf-header         { display: none !important; }
-  @page { margin: 20mm; }
-}`;
+	private async doPrintDesktop(): Promise<void> {
+		const html = buildPDFDocument(this.file.basename, this.previewEl);
+		new Notice('Generating PDF...', 2000);
 
-		window.print();
+		try {
+			// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+			const path = require('path') as typeof import('path');
+			// eslint-disable-next-line @typescript-eslint/no-require-imports
+			const fs = require('fs') as typeof import('fs');
+			// eslint-disable-next-line @typescript-eslint/no-require-imports
+			const os = require('os') as typeof import('os');
+			// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+			const { BrowserWindow } = require('@electron/remote') as any;
 
-		// Clean up after print dialog closes
+			// Write HTML to a temp file so BrowserWindow can load it cleanly
+			const tmpPath = path.join(os.tmpdir(), `md-to-pdf-${Date.now()}.html`);
+			fs.writeFileSync(tmpPath, html, 'utf8');
+
+			// Hidden window to render and export
+			const win = new BrowserWindow({ show: false });
+			await win.loadFile(tmpPath);
+
+			const pdfBuffer: Buffer = await win.webContents.printToPDF({
+				printBackground: true,
+				pageSize: 'A4',
+			});
+
+			win.close();
+			fs.unlinkSync(tmpPath);
+
+			// Save PDF next to the source note
+			const basePath = (this.app.vault.adapter as any).basePath as string;
+			const outputRelative = this.file.path.replace(/\.md$/, '.pdf');
+			const outputAbsolute = path.join(basePath, outputRelative);
+			fs.writeFileSync(outputAbsolute, pdfBuffer);
+
+			new Notice(`PDF saved: ${outputRelative}`);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			new Notice('PDF export failed: ' + message);
+			console.error('[md-to-pdf]', err);
+		}
+	}
+
+	private doPrintMobile(): void {
+		const html = buildHTMLDocument(this.file.basename, this.previewEl);
+		const printWindow = window.open('', '_blank');
+		if (!printWindow) {
+			new Notice('Pop-up blocked. Use "Save as HTML" instead.');
+			return;
+		}
+		printWindow.document.write(html);
+		printWindow.document.close();
+		printWindow.focus();
 		setTimeout(() => {
-			if (style) style.textContent = '';
-		}, 3000);
+			printWindow.print();
+			printWindow.close();
+		}, 600);
 	}
 
 	/** Method 2: write self-contained HTML file to vault */
