@@ -1,8 +1,82 @@
-/*
+/* MD to PDF Export plugin styles */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.md-to-pdf-modal {
+	width: 90vw;
+	max-width: 860px;
+	height: 85vh;
+	display: flex;
+	flex-direction: column;
+}
 
-If your plugin does not need CSS, delete this file.
+.md-to-pdf-modal .modal-content {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 0;
+}
 
-*/
+.md-to-pdf-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 10px 16px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	flex-shrink: 0;
+}
+
+.md-to-pdf-title {
+	font-weight: 600;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.md-to-pdf-btnrow {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.md-to-pdf-btn {
+	padding: 6px 14px;
+	border-radius: 6px;
+	font-size: 0.875em;
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--interactive-normal);
+	color: var(--text-normal);
+}
+
+.md-to-pdf-btn:active {
+	opacity: 0.7;
+}
+
+.md-to-pdf-preview {
+	flex: 1;
+	overflow-y: auto;
+	padding: 24px 32px;
+	background: var(--background-primary);
+	-webkit-overflow-scrolling: touch;
+}
+
+/* Horizontal scroll for wide tables on small screens */
+.md-to-pdf-preview table {
+	display: block;
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+@media print {
+	.md-to-pdf-header {
+		display: none !important;
+	}
+	.md-to-pdf-preview {
+		overflow: visible !important;
+		padding: 0 !important;
+	}
+}

@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "md-to-pdf",
+	"name": "MD to PDF Export",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"description": "Export markdown notes to PDF via print dialog or self-contained HTML. Works on Android and desktop.",
+	"author": "daeun-kr",
+	"authorUrl": "https://github.com/daeun-kr",
 	"isDesktopOnly": false
 }

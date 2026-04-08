@@ -1,99 +1,248 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import {
+	App,
+	Component,
+	MarkdownRenderer,
+	Modal,
+	Notice,
+	Plugin,
+	TFile,
+} from 'obsidian';
 
-// Remember to rename these classes and interfaces!
+// ---------------------------------------------------------------------------
+// HTML builder
+// ---------------------------------------------------------------------------
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+function escapeHtml(str: string): string {
+	return str
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
+}
 
-	async onload() {
-		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
+/**
+ * Collect CSS text from all loaded stylesheets so the exported HTML file
+ * carries the current theme styles without external dependencies.
+ */
+function collectPageCSS(): string {
+	const parts: string[] = [];
+	for (const sheet of Array.from(document.styleSheets)) {
+		try {
+			const rules = Array.from(sheet.cssRules ?? []);
+			for (const rule of rules) {
+				parts.push(rule.cssText);
 			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+		} catch {
+			// Cross-origin stylesheet -- skip silently
+		}
+	}
+	return parts.join('\n');
+}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			}
-		});
+function buildHTMLDocument(title: string, bodyEl: HTMLElement): string {
+	const css = collectPageCSS();
+	return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)}</title>
+  <style>
+${css}
+    /* ---- Export overrides ---- */
+    body {
+      background: #fff !important;
+      color: #000 !important;
+      padding: 24px 40px;
+      max-width: 820px;
+      margin: 0 auto;
+    }
+    @media print {
+      body { padding: 0; }
+      @page { margin: 20mm; }
+    }
+    pre, code { background: #f4f4f4 !important; color: #222 !important; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; }
+    th { background: #f0f0f0; }
+    img { max-width: 100%; }
+    blockquote { border-left: 4px solid #ccc; margin: 0; padding-left: 1em; color: #555; }
+  </style>
+</head>
+<body class="theme-light markdown-preview-view markdown-rendered">
+  ${bodyEl.innerHTML}
+</body>
+</html>`;
+}
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+// ---------------------------------------------------------------------------
+// Preview Modal
+// ---------------------------------------------------------------------------
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
+class PDFPreviewModal extends Modal {
+	private markdown: string;
+	private file: TFile;
+	private plugin: MDtoPDFPlugin;
+	private previewEl!: HTMLElement;
+	private component: Component;
 
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
+	constructor(app: App, markdown: string, file: TFile, plugin: MDtoPDFPlugin) {
+		super(app);
+		this.markdown = markdown;
+		this.file = file;
+		this.plugin = plugin;
+		this.component = new Component();
 	}
 
-	onunload() {
+	async onOpen(): Promise<void> {
+		const { contentEl, modalEl } = this;
+		modalEl.addClass('md-to-pdf-modal');
+		contentEl.empty();
+
+		// Header
+		const header = contentEl.createDiv({ cls: 'md-to-pdf-header' });
+		header.createEl('span', { cls: 'md-to-pdf-title', text: this.file.basename });
+
+		const btnRow = header.createDiv({ cls: 'md-to-pdf-btnrow' });
+
+		const printBtn = btnRow.createEl('button', {
+			cls: 'mod-cta md-to-pdf-btn',
+			text: 'Print / Save as PDF',
+		});
+		printBtn.addEventListener('click', () => { this.doPrint(); });
+
+		const htmlBtn = btnRow.createEl('button', {
+			cls: 'md-to-pdf-btn',
+			text: 'Save as HTML',
+		});
+		htmlBtn.addEventListener('click', () => { void this.doSaveHTML(); });
+
+		const closeBtn = btnRow.createEl('button', {
+			cls: 'md-to-pdf-btn',
+			text: 'Close',
+		});
+		closeBtn.addEventListener('click', () => { this.close(); });
+
+		// Preview area
+		this.previewEl = contentEl.createDiv({
+			cls: 'md-to-pdf-preview markdown-preview-view markdown-rendered',
+		});
+
+		this.component.load();
+		await MarkdownRenderer.render(
+			this.app,
+			this.markdown,
+			this.previewEl,
+			this.file.path,
+			this.component
+		);
+
+		// Disable internal link navigation inside the modal
+		this.previewEl.querySelectorAll<HTMLAnchorElement>('a.internal-link').forEach((a) => {
+			a.addEventListener('click', (e) => { e.preventDefault(); });
+		});
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+	/** Method 1: system print dialog -> user selects "Save as PDF" */
+	doPrint(): void {
+		const STYLE_ID = 'md-to-pdf-print-style';
+		let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+		if (!style) {
+			style = document.createElement('style');
+			style.id = STYLE_ID;
+			document.head.appendChild(style);
+		}
+
+		// Hide everything except our preview when printing
+		style.textContent = `
+@media print {
+  body > *                  { display: none !important; }
+  .modal-container          { display: block !important; }
+  .modal-container > *      { display: none !important; }
+  .md-to-pdf-modal          { display: block !important; box-shadow: none !important; border: none !important; position: static !important; }
+  .md-to-pdf-modal > * { display: none !important; }
+  .md-to-pdf-preview        { display: block !important; padding: 0 !important; overflow: visible !important; }
+  .md-to-pdf-header         { display: none !important; }
+  @page { margin: 20mm; }
+}`;
+
+		window.print();
+
+		// Clean up after print dialog closes
+		setTimeout(() => {
+			if (style) style.textContent = '';
+		}, 3000);
 	}
 
-	async saveSettings() {
-		await this.saveData(this.settings);
+	/** Method 2: write self-contained HTML file to vault */
+	async doSaveHTML(): Promise<void> {
+		const html = buildHTMLDocument(this.file.basename, this.previewEl);
+		const outputPath = this.file.path.replace(/\.md$/, '.html');
+
+		try {
+			const existing = this.app.vault.getAbstractFileByPath(outputPath);
+			if (existing instanceof TFile) {
+				await this.app.vault.modify(existing, html);
+			} else {
+				await this.app.vault.create(outputPath, html);
+			}
+			new Notice(`Saved: ${outputPath}\nOpen in Chrome -> menu -> Print -> Save as PDF`);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			new Notice('Export failed: ' + message);
+			console.error('[md-to-pdf]', err);
+		}
+	}
+
+	onClose(): void {
+		this.component.unload();
+		this.contentEl.empty();
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
+// ---------------------------------------------------------------------------
+// Plugin
+// ---------------------------------------------------------------------------
+
+export default class MDtoPDFPlugin extends Plugin {
+	async onload(): Promise<void> {
+		this.addRibbonIcon('file-down', 'Export to PDF', () => { void this.exportActive(); });
+
+		this.addCommand({
+			id: 'export-current-note',
+			name: 'Export current note',
+			callback: () => { void this.exportActive(); },
+		});
+
+		this.registerEvent(
+			this.app.workspace.on('file-menu', (menu, file) => {
+				if (!(file instanceof TFile) || file.extension !== 'md') return;
+				menu.addItem((item) => {
+					item
+						.setTitle('Export to PDF / HTML')
+						.setIcon('file-down')
+						.onClick(() => { void this.openExportModal(file); });
+				});
+			})
+		);
 	}
 
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
+	async exportActive(): Promise<void> {
+		const file = this.app.workspace.getActiveFile();
+		if (!file || file.extension !== 'md') {
+			new Notice('No active markdown note.');
+			return;
+		}
+		await this.openExportModal(file);
 	}
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+	async openExportModal(file: TFile): Promise<void> {
+		try {
+			const markdown = await this.app.vault.read(file);
+			new PDFPreviewModal(this.app, markdown, file, this).open();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			new Notice('Could not read file: ' + message);
+		}
 	}
 }
