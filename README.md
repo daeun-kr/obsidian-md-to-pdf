@@ -1,32 +1,37 @@
 # MD to PDF Export
 
-Export markdown notes to PDF directly inside Obsidian. Works on **Android** and desktop.
+Export markdown notes to PDF directly inside Obsidian. Works on **Android**, **iOS**, and **desktop**.
 
-## How it works
+## Features
 
-Two export methods are available:
+- One-tap export from ribbon icon, command palette, or file context menu
+- Preview rendered note before exporting
+- Platform-aware: uses the best available method per device
 
-| Method | How |
-|---|---|
-| **Print / Save as PDF** | Opens the system print dialog. On Android, tap "Save as PDF". On desktop, select your PDF printer. |
-| **Save as HTML** | Writes a self-contained `.html` file next to your note. Open it in Chrome and print to PDF from there. |
+## Platform behavior
 
-The HTML export embeds all current theme styles, so the output reflects your active Obsidian theme.
+| Platform | "Save as PDF" | "Save as HTML" |
+|---|---|---|
+| **Desktop (Mac/Windows/Linux)** | Generates `.pdf` file directly via Electron | Saves `.html` file to vault |
+| **iOS (16+)** | Opens system print dialog via WKWebView | Saves `.html` file to vault |
+| **Android** | Saves `.html` + shows step-by-step instructions | Saves `.html` file to vault |
+
+### Android PDF workflow
+After tapping "Save as PDF (via Chrome)":
+1. Open the saved `.html` file from your vault
+2. Open in Chrome
+3. Menu -> Share -> Print
+4. Save as PDF
 
 ## Usage
 
 Open any markdown note, then use one of:
 
 - **Ribbon icon** -- tap the `file-down` icon in the left sidebar
-- **Command palette** -- `Ctrl+P` / tap the command icon -> "MD to PDF Export: Export current note"
-- **File menu** -- long-press a file in the explorer -> "Export to PDF / HTML"
+- **Command palette** -- `Ctrl+P` -> "MD to PDF Export: Export current note"
+- **File context menu** -- long-press a file -> "Export to PDF / HTML"
 
-A preview modal opens showing the rendered note. Choose **Print / Save as PDF** or **Save as HTML**.
-
-## Android notes
-
-- On Android (tested on Galaxy Tab S10 FE), the recommended method is **Save as HTML**, then open the file in Chrome and use Chrome's print-to-PDF.
-- The **Print / Save as PDF** button calls `window.print()`, which may open the Android system print dialog depending on your device and Android version.
+A preview modal opens. Tap **Save as PDF** or **Save as HTML**.
 
 ## Manual installation
 
