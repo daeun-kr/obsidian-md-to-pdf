@@ -176,9 +176,12 @@ class PDFPreviewModal extends Modal {
 
 		const btnRow = header.createDiv({ cls: 'md-to-pdf-btnrow' });
 
+		const printBtnText = Platform.isDesktop ? 'Save as PDF'
+			: Platform.isIosApp ? 'Save as PDF'
+			: 'Save as PDF (via Chrome)';
 		const printBtn = btnRow.createEl('button', {
 			cls: 'mod-cta md-to-pdf-btn',
-			text: Platform.isMobile ? 'Save as PDF (via Chrome)' : 'Save as PDF',
+			text: printBtnText,
 		});
 		printBtn.addEventListener('click', () => { this.doPrint(); });
 
@@ -208,15 +211,13 @@ class PDFPreviewModal extends Modal {
 		});
 	}
 
-	/** Method 1: print to PDF
-	 *  - Desktop: save HTML to vault, open in default browser, user prints from there
-	 *  - Mobile:  open a new window and call print() directly
-	 */
 	doPrint(): void {
 		if (Platform.isDesktop) {
 			void this.doPrintDesktop();
+		} else if (Platform.isIosApp) {
+			this.doPrintIOS();
 		} else {
-			this.doPrintMobile();
+			void this.doPrintMobile();
 		}
 	}
 
@@ -264,7 +265,36 @@ class PDFPreviewModal extends Modal {
 		}
 	}
 
-	/** On mobile, direct PDF generation is not supported in Obsidian's WebView.
+	/** iOS 16+: WKWebView supports window.print() via a hidden iframe.
+	 *  Triggers the iOS system print dialog -> user can save as PDF. */
+	private doPrintIOS(): void {
+		const html = buildPDFDocument(this.file.basename, this.previewEl);
+
+		const iframe = document.createElement('iframe');
+		// Give the iframe real dimensions so iOS renders the full document layout
+		iframe.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;border:none;opacity:0;pointer-events:none;z-index:-1;';
+		document.body.appendChild(iframe);
+
+		const doc = iframe.contentDocument!;
+		doc.open();
+		doc.write(html);
+		doc.close();
+
+		setTimeout(() => {
+			try {
+				iframe.contentWindow?.print();
+			} catch {
+				// Older iOS -- fall back to HTML export
+				new Notice('Print not supported on this iOS version. Saving as HTML instead.');
+				void this.doSaveHTML();
+			}
+			setTimeout(() => {
+				if (document.body.contains(iframe)) document.body.removeChild(iframe);
+			}, 3000);
+		}, 800);
+	}
+
+	/** Android: direct PDF not supported in Obsidian WebView.
 	 *  Save as HTML and guide the user to print from Chrome. */
 	private async doPrintMobile(): Promise<void> {
 		await this.doSaveHTML();
@@ -283,11 +313,13 @@ class PDFPreviewModal extends Modal {
 			} else {
 				await this.app.vault.create(outputPath, html);
 			}
-			new Notice(
-				Platform.isMobile
-					? `Saved: ${outputPath}\n1. Open the file in Chrome\n2. Tap menu -> Share -> Print\n3. Save as PDF`
-					: `Saved: ${outputPath}`
-			);
+			let msg = outputPath;
+			if (Platform.isAndroidApp) {
+				msg = `Saved: ${outputPath}\n1. Open in Chrome\n2. Menu -> Share -> Print\n3. Save as PDF`;
+			} else if (Platform.isIosApp) {
+				msg = `Saved: ${outputPath}\n1. Open in Safari\n2. Share -> Print\n3. Save as PDF`;
+			}
+			new Notice(msg);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			new Notice('Export failed: ' + message);
